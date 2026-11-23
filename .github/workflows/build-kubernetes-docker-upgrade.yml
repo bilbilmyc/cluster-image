@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build:
@@ -24,7 +23,7 @@ jobs:
         version: [v1.34.13, v1.35.10]
     env:
       KUBERNETES_VERSION: ${{ matrix.version }}
-      IMAGE: ghcr.io/${{ github.repository }}/kubernetes-docker:${{ matrix.version }}
+      IMAGE: registry.cn-beijing.aliyuncs.com/vlabs/kubernetes-docker:${{ matrix.version }}
       SEALOS_RELEASE: v5.2.0
 
     steps:
@@ -63,11 +62,3 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           retention-days: 3
-
-      - name: 将已验证的镜像发布到 GitHub Packages
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '%s' "$GHCR_TOKEN" | sudo -n /usr/local/bin/sealos login --username "$GITHUB_ACTOR" --password-stdin ghcr.io
-          sudo -n /usr/local/bin/sealos push "$IMAGE"
-          sudo -n /usr/local/bin/sealos logout ghcr.io

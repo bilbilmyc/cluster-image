@@ -55,7 +55,7 @@ sudo sealos build \
     --tag "$image" "$rootfs"
 
 # 核对最终镜像中的二进制版本及离线仓库，防止只更新外层标签。
-built_container="$(sudo buildah from --pull never "$image")"
+built_container="$(sudo buildah from "$image")"
 trap 'sudo buildah rm "$built_container" "$base_container" >/dev/null 2>&1 || true' EXIT
 built_root="$(sudo buildah mount "$built_container")"
 test "$(sudo "$built_root/bin/kubeadm" version -o short)" = "$version"
