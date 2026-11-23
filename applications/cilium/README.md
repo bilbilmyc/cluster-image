@@ -9,11 +9,13 @@
 sealos run docker.io/labring/cilium:v1.14.12
 ```
 
-This will install cilium with the follow comand:
+Sealos runs the Cilium CLI with the bundled chart.
 
 ```bash
-cilium install --chart-directory charts/cilium --helm-set kubeProxyReplacement=strict,k8sServiceHost=apiserver.cluster.local,k8sServicePort=6443
+cilium install --chart-directory charts/cilium --helm-set k8sServiceHost=apiserver.cluster.local,k8sServicePort=6443
 ```
+
+The Cilium CLI detects whether kube-proxy is installed. Set `kubeProxyReplacement` in `ExtraValues` to override the detected mode.
 
 Get app status
 
