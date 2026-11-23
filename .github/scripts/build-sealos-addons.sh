@@ -77,8 +77,16 @@ cilium_image() {
 kubeProxyReplacement: false
 k8sServiceHost: apiserver.cluster.local
 k8sServicePort: 6443
+# 离线仓库保存单平台镜像，使用上游发行版标签来匹配本地镜像。
+image:
+  useDigest: false
+envoy:
+  image:
+    useDigest: false
 operator:
   replicas: 1
+  image:
+    useDigest: false
 YAML
     cat > "$context/Kubefile" <<'KUBEFILE'
 FROM scratch
