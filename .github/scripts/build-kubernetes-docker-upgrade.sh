@@ -19,9 +19,11 @@ case "$runtime/$arch" in
         ;;
     containerd/amd64)
         base_image='docker.io/labring/kubernetes@sha256:835e4702e614db96ab003181181e70892d8bd4faf78a3265dd3aedba6985226f'
+        containerd_checksum='da656542e754c699a0f438eab925e6ffdbd6346a4428e659f83dc058f04dcffe'
         ;;
     containerd/arm64)
         base_image='docker.io/labring/kubernetes@sha256:98965a45b6ff1466df502ed78f48ccd12b03a3507f42c0d7e2c20d83cb23611c'
+        containerd_checksum='37b84b9534533672528141b9d815f58621a2fe5deee2daa84317800255756689'
         ;;
     *)
         printf '未知平台或运行时 / Unknown platform or runtime: %s/%s\n' "$runtime" "$arch" >&2
@@ -57,6 +59,18 @@ if [[ "$runtime" == docker ]]; then
     download -o "$rootfs/cri/cri-dockerd.tgz" \
         "https://github.com/Mirantis/cri-dockerd/releases/download/v$cri_dockerd_version/cri-dockerd-$cri_dockerd_version.$arch.tgz"
     printf '%s  %s\n' "$cri_dockerd_checksum" "$rootfs/cri/cri-dockerd.tgz" | sha256sum --check --status
+else
+    # 保留引导脚本需要的 usr/bin 路径和原有的 OCI 运行时文件。
+    containerd_version='2.4.2'
+    release="containerd-static-$containerd_version-linux-$arch.tar.gz"
+    download -o "$workspace/$release"         "https://github.com/containerd/containerd/releases/download/v$containerd_version/$release"
+    printf '%s  %s\n' "$containerd_checksum" "$workspace/$release" | sha256sum --check --status
+    mkdir -p "$workspace/containerd-bundle" "$workspace/containerd-release"
+    tar -xzf "$rootfs/cri/cri-containerd.tar.gz" -C "$workspace/containerd-bundle"
+    tar -xzf "$workspace/$release" -C "$workspace/containerd-release"
+    cp -a "$workspace/containerd-release/bin/." "$workspace/containerd-bundle/usr/bin/"
+    tar -czf "$rootfs/cri/cri-containerd.tar.gz" -C "$workspace/containerd-bundle" usr/bin
+    "$workspace/containerd-bundle/usr/bin/containerd" --version | grep -F "v$containerd_version"
 fi
 
 printf '下载并校验 Kubernetes 工具 / Downloading and verifying Kubernetes tools for %s\n' "$version"
