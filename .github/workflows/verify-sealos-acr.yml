@@ -13,12 +13,15 @@ permissions:
 
 jobs:
   bootstrap:
-    name: ${{ matrix.item.runtime }} ${{ matrix.item.version }} 单节点安装
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.item.runtime }} ${{ matrix.item.version }} ${{ matrix.platform.arch }} 单节点安装
+    runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
+        platform:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
         item:
           - { version: v1.36.6, runtime: containerd, cilium: v1.20.5 }
           - { version: v1.37.2, runtime: containerd, cilium: v1.21.0-pre.4 }
@@ -36,7 +39,7 @@ jobs:
 
       - uses: ./.github/actions/install-sealos
         with:
-          arch: amd64
+          arch: ${{ matrix.platform.arch }}
 
       - name: 在临时运行器安装单节点集群
         run: |
