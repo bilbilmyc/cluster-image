@@ -1,0 +1,84 @@
+name: 验证阿里云镜像的一键安装
+
+on:
+  push:
+    branches:
+      - codex/build-kubernetes-docker-upgrade
+    paths:
+      - .github/workflows/verify-sealos-acr.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    name: ${{ matrix.item.runtime }} ${{ matrix.item.version }} 单节点安装
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        item:
+          - { version: v1.36.6, runtime: containerd, cilium: v1.20.5 }
+          - { version: v1.37.2, runtime: containerd, cilium: v1.21.0-pre.4 }
+          - { version: v1.37.2, runtime: docker, cilium: v1.21.0-pre.4 }
+    env:
+      REGISTRY: registry.cn-beijing.aliyuncs.com/vlabs
+      KUBERNETES_VERSION: ${{ matrix.item.version }}
+      TARGET_RUNTIME: ${{ matrix.item.runtime }}
+      CILIUM_VERSION: ${{ matrix.item.cilium }}
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/install-sealos
+        with:
+          arch: amd64
+
+      - name: 在临时运行器安装单节点集群
+        run: |
+          sudo swapoff -a
+          sudo systemctl stop docker.socket docker.service containerd.service
+          package="$REGISTRY/kubernetes-$TARGET_RUNTIME:$KUBERNETES_VERSION"
+
+          # 等待公开标签可拉取，再测试真实的 Sealos 入口。
+          for attempt in $(seq 1 12); do
+            if sudo sealos pull "$package" >>"$RUNNER_TEMP/sealos-pull.log" 2>&1; then
+              break
+            fi
+            if [[ "$attempt" == 12 ]]; then
+              tail -n 10 "$RUNNER_TEMP/sealos-pull.log"
+              exit 1
+            fi
+            sleep 20
+          done
+
+          if ! sudo sealos run "$package" \
+              "$REGISTRY/helm:v4.3.2" \
+              "$REGISTRY/cilium:$CILIUM_VERSION" \
+              "$REGISTRY/traefik:v3.7.19" \
+              --single >"$RUNNER_TEMP/sealos-bootstrap.log" 2>&1; then
+            grep -Ei 'error|failed|not ready' "$RUNNER_TEMP/sealos-bootstrap.log" |
+              grep -viE 'token|certificate-key|password|passwd' | tail -n 18 || true
+            exit 1
+          fi
+
+      - name: 核对节点、容器运行时和入口
+        run: |
+          kubectl() { sudo /usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf "$@"; }
+          kubectl wait --for=condition=Ready node --all --timeout=150s
+          kubectl -n kube-system rollout status ds/cilium --timeout=150s
+          kubectl -n traefik rollout status deploy/traefik --timeout=150s
+          kubectl get nodes -o custom-columns='NAME:.metadata.name,VERSION:.status.nodeInfo.kubeletVersion,RUNTIME:.status.nodeInfo.containerRuntimeVersion'
+          kubectl get svc -n traefik traefik -o custom-columns='NAME:.metadata.name,PORTS:.spec.ports[*].nodePort'
+          test "$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}')" = "$KUBERNETES_VERSION"
+          test "$(kubectl -n traefik get deploy traefik -o jsonpath='{.status.readyReplicas}')" = 1
+          case "$TARGET_RUNTIME" in
+            containerd) expected='containerd://2.4.2' ;;
+            docker) expected='docker://' ;;
+          esac
+          runtime="$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.containerRuntimeVersion}')"
+          [[ "$runtime" == "$expected"* ]]
