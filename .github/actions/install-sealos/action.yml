@@ -1,0 +1,30 @@
+name: 准备 Sealos 构建工具
+description: 安装与测试集群一致的 Sealos 和 Buildah
+inputs:
+  arch:
+    description: 构建主机的 OCI 架构
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        TARGET_ARCH: ${{ inputs.arch }}
+      run: |
+        if ! command -v buildah >/dev/null; then
+          sudo apt-get update
+          sudo apt-get install -y buildah
+        fi
+        case "$TARGET_ARCH" in
+          amd64) checksum='feb275bc174ec6d7980f1b40e8ec9aec156fbbff1b1072a94c55f5784c85c221' ;;
+          arm64) checksum='e068ca45b770b6420ad8cdba5743ea9abfd77c17330f3b9322cec5f684b8fe7b' ;;
+          *) exit 1 ;;
+        esac
+        archive="sealos_5.2.0_linux_$TARGET_ARCH.tar.gz"
+        curl -fsSL --retry 4 --max-time 300 -o "$RUNNER_TEMP/$archive" \
+          "https://github.com/labring/sealos/releases/download/v5.2.0/$archive"
+        printf '%s  %s\n' "$checksum" "$RUNNER_TEMP/$archive" | sha256sum --check
+        mkdir -p "$RUNNER_TEMP/sealos"
+        tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/sealos"
+        binary="$(find "$RUNNER_TEMP/sealos" -type f -name sealos -print -quit)"
+        sudo install -m 0755 "$binary" /usr/local/bin/sealos
