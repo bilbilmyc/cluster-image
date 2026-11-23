@@ -42,6 +42,16 @@ jobs:
         run: |
           sudo swapoff -a
           sudo systemctl stop docker.socket docker.service containerd.service
+          # GitHub 运行器预装 Docker 与 containerd，先清理运行器自己的安装包。
+          packages=()
+          for package in moby-containerd moby-engine moby-cli docker-ce docker-ce-cli containerd.io docker.io containerd; do
+            if [[ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)" == installed ]]; then
+              packages+=("$package")
+            fi
+          done
+          if [[ "${#packages[@]}" -gt 0 ]]; then
+            sudo apt-get purge -y "${packages[@]}"
+          fi
           package="$REGISTRY/kubernetes-$TARGET_RUNTIME:$KUBERNETES_VERSION"
 
           # 等待公开标签可拉取，再测试真实的 Sealos 入口。
