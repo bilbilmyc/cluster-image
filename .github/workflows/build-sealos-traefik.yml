@@ -8,6 +8,7 @@ on:
       - .github/scripts/build-sealos-addons.sh
       - .github/actions/install-sealos/action.yml
       - applications/traefik/vlabs/**
+      - applications/traefik/build/**
   workflow_dispatch:
 
 permissions:
@@ -31,6 +32,8 @@ jobs:
       - uses: ./.github/actions/install-sealos
         with:
           arch: ${{ matrix.platform.arch }}
+      - name: 验证环境变量合并
+        run: go test applications/traefik/build/env-values{,_test}.go
       - name: 构建并核对离线镜像
         env:
           TARGET_ARCH: ${{ matrix.platform.arch }}

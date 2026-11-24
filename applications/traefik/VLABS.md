@@ -3,7 +3,7 @@
 镜像内含 Traefik v3.7.19、Helm Chart 42.4.1 和对应平台的离线工作负载镜像。使用集群控制节点上的 Sealos 和 Helm（升级已有 release 需支持 `--reset-then-reuse-values`）。
 
 ```bash
-sealos run registry.cn-beijing.aliyuncs.com/vlabs/traefik:v3.7.19-r2
+sealos run registry.cn-beijing.aliyuncs.com/vlabs/traefik:v3.7.19-r3
 kubectl -n traefik get svc traefik
 ```
 
@@ -13,7 +13,43 @@ kubectl -n traefik get svc traefik
 | web | 80/TCP | 32011 | HTTP |
 | websecure | 443/TCP | 32012 | HTTPS |
 
-镜像升级 `traefik/traefik` 时沿用已有 Helm values，并覆盖上述 Service 端口。Chart 安装到 `/opt/vlabs/traefik/charts`。示例安装到 `/opt/vlabs/traefik/examples`。建议将要维护的配置复制到自己的目录。
+## 用环境变量交付
+
+在 Sealos 控制节点运行以下命令。新部署可直接运行，已有同标签时 `--force` 会重新执行这个应用的安装脚本。
+
+```bash
+sealos run --force registry.cn-beijing.aliyuncs.com/vlabs/traefik:v3.7.19-r3 \
+  -e TRAEFIK_REQUEST_TIMEOUT=7200s
+```
+
+`TRAEFIK_REQUEST_TIMEOUT` 同时设置 HTTP 和 HTTPS 两个入口的 `readTimeout`、`writeTimeout`，以及默认后端的 `responseHeaderTimeout`。建连和空闲连接仍使用现场设置。时长支持 `7200s`、`2h`、`0s` 等非负值，纯数字按秒处理。单项环境变量优先于本次命令的快捷参数。
+
+| 环境变量 | 控制项 |
+| --- | --- |
+| `TRAEFIK_READ_TIMEOUT` | 客户端完整请求的读取时限，含上传 |
+| `TRAEFIK_WRITE_TIMEOUT` | 客户端响应写完的时限，含流式输出 |
+| `TRAEFIK_IDLE_TIMEOUT` | 客户端保活连接等待下一次请求 |
+| `TRAEFIK_DIAL_TIMEOUT` | 与后端建连 |
+| `TRAEFIK_RESPONSE_HEADER_TIMEOUT` | 请求体发完后等待后端响应头 |
+| `TRAEFIK_IDLE_CONN_TIMEOUT` | 后端连接池空闲回收 |
+| `TRAEFIK_GLOBAL_CORS` | `true` 给两个入口挂载全局跨域中间件，`false` 解除挂载 |
+
+下面的示例给长请求两小时、上传两分钟，并开启全局跨域。
+
+```bash
+sealos run --force registry.cn-beijing.aliyuncs.com/vlabs/traefik:v3.7.19-r3 \
+  -e TRAEFIK_REQUEST_TIMEOUT=7200s \
+  -e TRAEFIK_READ_TIMEOUT=120s \
+  -e TRAEFIK_GLOBAL_CORS=true
+```
+
+省略的设置在新装时采用 Chart 默认值，在升级时沿用现有 Helm 配置。超时和入口中间件挂载属于启动配置，更新后由 Helm 滚动升级，`helm get values traefik -n traefik` 可查看结果。显式使用自定义 `ServersTransport` 的业务仍在自己的 transport 中配置后端超时。
+
+首次开启全局跨域时，安装脚本先创建 `traefik/global-cors`，再将它挂到已有入口中间件链之前。如果该 Middleware 已存在，则沿用现场定义。设为 `false` 时保留 Middleware 对象，业务路由仍可单独引用。修改允许来源、请求头及凭据时使用下方的 Middleware 配置。
+
+## 使用本地配置文件
+
+镜像升级 `traefik/traefik` 时保留已有 Helm values，覆盖上述 Service 端口并应用显式传入的环境变量。Chart 安装到 `/opt/vlabs/traefik/charts`。示例安装到 `/opt/vlabs/traefik/examples`。可将要维护的配置复制到自己的目录。
 
 ```bash
 install -d -m 0700 /root/traefik-config

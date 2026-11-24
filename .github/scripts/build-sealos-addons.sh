@@ -111,10 +111,13 @@ traefik_image() {
     local context="$workspace/traefik"
     local bundle="$context/vlabs-traefik"
     local chart="$bundle/charts/traefik-$traefik_chart.tgz"
-    local release="$traefik_version-r2"
+    local release="$traefik_version-r3"
     local expected_digest container root actual_digest
     mkdir -p "$bundle/charts" "$context/images/shim"
     cp -R applications/traefik/vlabs/. "$bundle/"
+    # 静态打包参数转换工具，离线安装节点只需现有的 Helm 和 kubectl。
+    CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w" \
+        -o "$bundle/env-values" applications/traefik/build/env-values.go
     "$helm_bin" pull 'oci://ghcr.io/traefik/helm/traefik' --version "$traefik_chart" \
         --destination "$bundle/charts"
     printf '%s  %s\n' a0d62ce742cbda20a4556475204b665e66be997e4c13f1b47c56844c462976c1 "$chart" | sha256sum --check
