@@ -1,0 +1,115 @@
+name: 验证监控组件一键安装
+
+on:
+  push:
+    branches:
+      - codex/sealos-monitoring
+    paths:
+      - .github/workflows/verify-sealos-monitoring.yml
+      - applications/monitoring/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    name: ${{ matrix.item.runtime }} ${{ matrix.item.version }} ${{ matrix.platform.arch }} 单节点安装
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+        item:
+          - { version: v1.36.6, runtime: containerd, cilium: v1.20.5 }
+    env:
+      REGISTRY: registry.cn-beijing.aliyuncs.com/vlabs
+      KUBERNETES_VERSION: ${{ matrix.item.version }}
+      TARGET_RUNTIME: ${{ matrix.item.runtime }}
+      CILIUM_VERSION: ${{ matrix.item.cilium }}
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/install-sealos
+        with:
+          arch: ${{ matrix.platform.arch }}
+
+      - name: 在临时运行器安装单节点集群
+        run: |
+          sudo swapoff -a
+          sudo systemctl stop docker.socket docker.service containerd.service
+          # GitHub 运行器预装 Docker 与 containerd，先清理运行器自己的安装包。
+          packages=()
+          for package in moby-containerd moby-engine moby-cli docker-ce docker-ce-cli containerd.io docker.io containerd; do
+            if [[ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)" == installed ]]; then
+              packages+=("$package")
+            fi
+          done
+          if [[ "${#packages[@]}" -gt 0 ]]; then
+            sudo apt-get purge -y "${packages[@]}"
+          fi
+          package="$REGISTRY/kubernetes-$TARGET_RUNTIME:$KUBERNETES_VERSION"
+
+          # 等待公开标签可拉取，再测试真实的 Sealos 入口。
+          for attempt in $(seq 1 12); do
+            if sudo sealos pull "$package" >>"$RUNNER_TEMP/sealos-pull.log" 2>&1; then
+              break
+            fi
+            if [[ "$attempt" == 12 ]]; then
+              tail -n 10 "$RUNNER_TEMP/sealos-pull.log"
+              exit 1
+            fi
+            sleep 20
+          done
+
+          if ! sudo sealos run "$package" \
+              "$REGISTRY/helm:v4.3.2" \
+              "$REGISTRY/cilium:$CILIUM_VERSION" \
+              "$REGISTRY/traefik:v3.7.19" \
+              "$REGISTRY/monitoring:20261124" \
+              --single >"$RUNNER_TEMP/sealos-bootstrap.log" 2>&1; then
+            grep -Ei 'error|failed|not ready' "$RUNNER_TEMP/sealos-bootstrap.log" |
+              grep -viE 'token|certificate-key|password|passwd' | tail -n 18 || true
+            exit 1
+          fi
+
+      - name: 核对节点、容器运行时和入口
+        run: |
+          kubectl() { sudo /usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf "$@"; }
+          kubectl wait --for=condition=Ready node --all --timeout=150s
+          kubectl -n kube-system rollout status ds/cilium --timeout=150s
+          kubectl -n traefik rollout status deploy/traefik --timeout=150s
+          kubectl get nodes -o custom-columns='NAME:.metadata.name,VERSION:.status.nodeInfo.kubeletVersion,RUNTIME:.status.nodeInfo.containerRuntimeVersion'
+          kubectl get svc -n traefik traefik -o custom-columns='NAME:.metadata.name,PORTS:.spec.ports[*].nodePort'
+          test "$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}')" = "$KUBERNETES_VERSION"
+          test "$(kubectl -n traefik get deploy traefik -o jsonpath='{.status.readyReplicas}')" = 1
+          case "$TARGET_RUNTIME" in
+            containerd) expected='containerd://2.4.2' ;;
+            docker) expected='docker://' ;;
+          esac
+          runtime="$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.containerRuntimeVersion}')"
+          [[ "$runtime" == "$expected"* ]]
+
+
+      - name: 核对监控组件、持久卷和镜像来源
+        run: |
+          kubectl() { sudo /usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf "$@"; }
+          kubectl -n monitoring wait --for=jsonpath='{.status.phase}'=Bound pvc/storage-loki-0 --timeout=180s
+          kubectl -n monitoring rollout status statefulset/loki --timeout=180s
+          kubectl -n monitoring rollout status deployment/monitor-grafana --timeout=180s
+          kubectl -n monitoring rollout status daemonset/alloy --timeout=180s
+          prometheus_name="$(kubectl -n monitoring get prometheus -o jsonpath='{.items[0].metadata.name}')"
+          test -n "$prometheus_name"
+          kubectl -n monitoring wait --for=create "statefulset/prometheus-$prometheus_name" --timeout=180s
+          kubectl -n monitoring rollout status "statefulset/prometheus-$prometheus_name" --timeout=180s
+          sudo env KUBECONFIG=/etc/kubernetes/admin.conf helm list -n monitoring -o json |
+            jq -e '[.[] | select(.status == "deployed") | .name] | sort == ["alloy","loki","monitor"]'
+          kubectl -n monitoring get pods -o json |
+            jq -e --arg registry "$REGISTRY/" '[.items[].spec | (.containers[]?, .initContainers[]?)] | length > 0 and all(.[]; .image | startswith($registry))'
+          kubectl -n monitoring get pods,pvc

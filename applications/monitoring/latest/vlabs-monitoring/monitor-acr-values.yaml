@@ -1,0 +1,71 @@
+# 镜像路径沿用 vlabs 的平铺仓库命名。Loki 网关与 Grafana 使用同一个命名空间。
+grafana:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/grafana
+    tag: 13.3.1-distroless
+  sidecar:
+    image:
+      registry: registry.cn-beijing.aliyuncs.com
+      repository: vlabs/k8s-sidecar
+      tag: "2.14.3"
+  initChownData:
+    image:
+      registry: registry.cn-beijing.aliyuncs.com
+      repository: vlabs/busybox
+      tag: "1.38.0"
+  testFramework:
+    image:
+      registry: registry.cn-beijing.aliyuncs.com
+      repository: vlabs/bats
+      tag: "1.14.0"
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway
+
+prometheusOperator:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/prometheus-operator
+    tag: v0.95.2
+  prometheusConfigReloader:
+    image:
+      registry: registry.cn-beijing.aliyuncs.com
+      repository: vlabs/prometheus-config-reloader
+      tag: v0.95.2
+  admissionWebhooks:
+    patch:
+      image:
+        registry: registry.cn-beijing.aliyuncs.com
+        repository: vlabs/kube-webhook-certgen
+        tag: "1.11.1"
+
+prometheus:
+  prometheusSpec:
+    image:
+      registry: registry.cn-beijing.aliyuncs.com
+      repository: vlabs/prometheus
+      tag: v3.16.0-distroless
+
+alertmanager:
+  alertmanagerSpec:
+    image:
+      registry: registry.cn-beijing.aliyuncs.com
+      repository: vlabs/alertmanager
+      tag: v0.35.0
+
+kube-state-metrics:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/kube-state-metrics
+    tag: v2.20.0
+
+prometheus-node-exporter:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/node-exporter
+    tag: v1.13.1
+    distroless: true

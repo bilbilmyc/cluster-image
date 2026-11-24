@@ -1,0 +1,3 @@
+FROM scratch
+COPY vlabs-monitoring ./vlabs-monitoring
+CMD ["bash vlabs-monitoring/install.sh"]

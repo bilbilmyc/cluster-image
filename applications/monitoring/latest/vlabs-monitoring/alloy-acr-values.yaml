@@ -1,0 +1,60 @@
+image:
+  registry: registry.cn-beijing.aliyuncs.com
+  repository: vlabs/alloy
+  tag: v1.22.0
+
+configReloader:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/prometheus-config-reloader
+    tag: v0.94.2
+
+controller:
+  type: daemonset
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+      effect: NoSchedule
+
+alloy:
+  configMap:
+    # 每个 Alloy 只采集所在节点的 Pod 日志，避免多节点重复采集。
+    content: |
+      discovery.kubernetes "pods" {
+        role = "pod"
+        selectors {
+          role  = "pod"
+          field = "spec.nodeName=" + sys.env("K8S_NODE_NAME")
+        }
+      }
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+      }
+
+      loki.source.kubernetes "pod_logs" {
+        targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.write.local.receiver]
+      }
+
+      loki.write "local" {
+        endpoint {
+          url = "http://loki-gateway/loki/api/v1/push"
+        }
+      }

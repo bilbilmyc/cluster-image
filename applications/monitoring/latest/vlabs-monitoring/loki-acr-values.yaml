@@ -1,0 +1,83 @@
+deploymentMode: Monolithic
+
+loki:
+  # 单租户交付配置通过集群内的网关收发日志。
+  auth_enabled: false
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/loki
+    tag: "3.7.10"
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2026-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+singleBinary:
+  replicas: 1
+  # 默认使用现场集群的默认 StorageClass，也可以在此指定 storageClass。
+  persistence:
+    enabled: true
+    size: 10Gi
+
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+gateway:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/nginx-unprivileged
+    tag: 1.31.10-alpine3.24
+  metrics:
+    image:
+      registry: registry.cn-beijing.aliyuncs.com
+      repository: vlabs/access-log-exporter
+      tag: "1.0.3"
+
+lokiCanary:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/loki-canary
+    tag: "3.7.10"
+
+sidecar:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/k8s-sidecar
+    tag: "2.14.3"
+
+memcached:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/memcached
+    tag: 1.6.45-alpine
+
+memcachedExporter:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/memcached-exporter
+    tag: v0.18.0
+
+# 小型交付集群先使用较小的缓存容量，保留缓存和监控功能。
+chunksCache:
+  allocatedMemory: 512
+resultsCache:
+  allocatedMemory: 256
+
+test:
+  image:
+    registry: registry.cn-beijing.aliyuncs.com
+    repository: vlabs/loki-helm-test
+    tag: sha-257e86d4d4a6
