@@ -16,9 +16,15 @@ command -v kubectl >/dev/null
 
 kubectl create namespace "$namespace" --dry-run=client -o yaml | kubectl apply -f -
 
+loki_ephemeral="${LOKI_EPHEMERAL:-false}"
 storage_class="${LOKI_STORAGE_CLASS:-}"
 existing_claim="$(kubectl -n "$namespace" get pvc storage-loki-0 --ignore-not-found \
     -o jsonpath='{.metadata.name}{"|"}{.spec.storageClassName}')"
+if [[ "$loki_ephemeral" == true && ( -n "$existing_claim" || -n "$storage_class" ) ]]; then
+    log "Loki 已有 PVC 或指定了存储类，无法启用临时模式" "Loki ephemeral mode requires no existing PVC or explicit StorageClass"
+    exit 1
+fi
+
 if [[ -n "$existing_claim" ]]; then
     existing_class="${existing_claim#*|}"
     existing_class="${existing_class:--}"
@@ -29,14 +35,18 @@ if [[ -n "$existing_claim" ]]; then
     storage_class="$existing_class"
 fi
 
-if [[ -z "$storage_class" ]]; then
+if [[ "$loki_ephemeral" != true && -z "$storage_class" ]]; then
     # 有多个默认存储类时，采用创建时间最新的一个。
     storage_class="$(kubectl get storageclass --sort-by=.metadata.creationTimestamp \
         -o go-template='{{range .items}}{{if .metadata.annotations}}{{if or (eq (index .metadata.annotations "storageclass.kubernetes.io/is-default-class") "true") (eq (index .metadata.annotations "storageclass.beta.kubernetes.io/is-default-class") "true")}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}{{end}}' \
         | awk 'NF { value=$0 } END { print value }')"
 fi
 
-if [[ -z "$storage_class" ]]; then
+loki_options=()
+if [[ "$loki_ephemeral" == true ]]; then
+    loki_options+=(--set singleBinary.persistence.enabled=false)
+    log "Loki 使用临时卷" "Loki uses an ephemeral volume"
+elif [[ -z "$storage_class" ]]; then
     # 裸集群使用控制面的本地卷，现场也可通过 LOKI_STORAGE_CLASS 选择已有存储。
     hostname_full="$(hostname)"
     hostname_short="$(hostname -s)"
@@ -86,7 +96,9 @@ elif [[ "$storage_class" != "-" ]]; then
     kubectl get storageclass "$storage_class" >/dev/null
 fi
 
-loki_options=(--set-string "singleBinary.persistence.storageClass=$storage_class")
+if [[ -n "$storage_class" ]]; then
+    loki_options+=(--set-string "singleBinary.persistence.storageClass=$storage_class")
+fi
 if [[ "$storage_class" == "$local_storage_class" ]]; then
     loki_options+=(
         --set-string 'singleBinary.tolerations[0].key=node-role.kubernetes.io/control-plane'

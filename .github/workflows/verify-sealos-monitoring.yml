@@ -54,6 +54,9 @@ jobs:
           if [[ "${#packages[@]}" -gt 0 ]]; then
             sudo apt-get purge -y "${packages[@]}"
           fi
+          # 拦截常见上游镜像仓库，校验安装只依赖 vlabs 镜像和镜像包内的缓存。
+          printf '%s\n' '127.0.0.1 registry.k8s.io k8s.gcr.io gcr.io quay.io ghcr.io docker.io registry-1.docker.io auth.docker.io' |
+            sudo tee -a /etc/hosts >/dev/null
           package="$REGISTRY/kubernetes-$TARGET_RUNTIME:$KUBERNETES_VERSION"
 
           # 等待公开标签可拉取，再测试真实的 Sealos 入口。
@@ -72,7 +75,8 @@ jobs:
               "$REGISTRY/helm:v4.3.2" \
               "$REGISTRY/cilium:$CILIUM_VERSION" \
               "$REGISTRY/traefik:v3.7.19" \
-              "$REGISTRY/monitoring:20261124" \
+              "$REGISTRY/monitoring:20261124-2" \
+              -e LOKI_EPHEMERAL=true \
               --single >"$RUNNER_TEMP/sealos-bootstrap.log" 2>&1; then
             grep -Ei 'error|failed|not ready' "$RUNNER_TEMP/sealos-bootstrap.log" |
               grep -viE 'token|certificate-key|password|passwd' | tail -n 18 || true
@@ -85,6 +89,7 @@ jobs:
           kubectl wait --for=condition=Ready node --all --timeout=150s
           kubectl -n kube-system rollout status ds/cilium --timeout=150s
           kubectl -n traefik rollout status deploy/traefik --timeout=150s
+          sudo /usr/bin/helm version --short | grep -q '^v4\.3\.2'
           kubectl get nodes -o custom-columns='NAME:.metadata.name,VERSION:.status.nodeInfo.kubeletVersion,RUNTIME:.status.nodeInfo.containerRuntimeVersion'
           kubectl get svc -n traefik traefik -o custom-columns='NAME:.metadata.name,PORTS:.spec.ports[*].nodePort'
           test "$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}')" = "$KUBERNETES_VERSION"
@@ -97,17 +102,25 @@ jobs:
           [[ "$runtime" == "$expected"* ]]
 
 
-      - name: 核对监控组件、持久卷和镜像来源
+      - name: 核对监控组件、临时卷和镜像来源
         run: |
           kubectl() { sudo /usr/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf "$@"; }
-          kubectl -n monitoring wait --for=jsonpath='{.status.phase}'=Bound pvc/storage-loki-0 --timeout=180s
           kubectl -n monitoring rollout status statefulset/loki --timeout=180s
+          kubectl get storageclass -o json | jq -e '.items | length == 0'
+          kubectl -n monitoring get pvc -o json | jq -e '.items | length == 0'
+          kubectl -n monitoring get statefulset loki -o json |
+            jq -e '.spec | ((.volumeClaimTemplates // []) | length == 0) and
+              any(.template.spec.volumes[]; .name == "storage" and has("emptyDir"))'
           kubectl -n monitoring rollout status deployment/monitor-grafana --timeout=180s
           kubectl -n monitoring rollout status daemonset/alloy --timeout=180s
           prometheus_name="$(kubectl -n monitoring get prometheus -o jsonpath='{.items[0].metadata.name}')"
           test -n "$prometheus_name"
           kubectl -n monitoring wait --for=create "statefulset/prometheus-$prometheus_name" --timeout=180s
           kubectl -n monitoring rollout status "statefulset/prometheus-$prometheus_name" --timeout=180s
+          alertmanager_name="$(kubectl -n monitoring get alertmanager -o jsonpath='{.items[0].metadata.name}')"
+          test -n "$alertmanager_name"
+          kubectl -n monitoring wait --for=create "statefulset/alertmanager-$alertmanager_name" --timeout=180s
+          kubectl -n monitoring rollout status "statefulset/alertmanager-$alertmanager_name" --timeout=180s
           sudo env KUBECONFIG=/etc/kubernetes/admin.conf helm list -n monitoring -o json |
             jq -e '[.[] | select(.status == "deployed") | .name] | sort == ["alloy","loki","monitor"]'
           kubectl -n monitoring get pods -o json |
