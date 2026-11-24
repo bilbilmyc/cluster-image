@@ -1,0 +1,14 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: global-cors
+  namespace: traefik
+spec:
+  headers:
+    accessControlAllowOriginList: ["*"]
+    accessControlAllowMethods: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS]
+    # 浏览器要求单独列出 Authorization。
+    accessControlAllowHeaders: ["*", Authorization]
+    accessControlAllowCredentials: false
+    accessControlMaxAge: 600
+    addVaryHeader: true

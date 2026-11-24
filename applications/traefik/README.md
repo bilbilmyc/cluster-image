@@ -2,6 +2,8 @@
 
 The Cloud Native Application Proxy.
 
+vlabs 的镜像安装、三个 NodePort、全局跨域和超时调整见 [Traefik 部署手册](VLABS.md)。
+
 ## Prerequisites
 
 - Kubernetes(depends on the app requirements)

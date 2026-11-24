@@ -1,0 +1,16 @@
+service:
+  spec:
+    type: NodePort
+ports:
+  traefik:
+    # Service 的 9000 转发到 Chart 的管理入口，保留现有探针端口。
+    expose:
+      default: true
+    exposedPort: 9000
+    nodePort: 32010
+  web:
+    exposedPort: 80
+    nodePort: 32011
+  websecure:
+    exposedPort: 443
+    nodePort: 32012

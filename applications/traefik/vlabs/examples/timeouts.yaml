@@ -1,0 +1,16 @@
+# 入口读完整请求、写响应和等待下一次请求的时限。
+ports:
+  web:
+    transport:
+      respondingTimeouts: &incoming
+        readTimeout: 120s
+        writeTimeout: 600s
+        idleTimeout: 180s
+  websecure:
+    transport:
+      respondingTimeouts: *incoming
+# 默认后端连接的建连、等待响应头和连接池空闲时限。合并现有启动参数后再应用。
+additionalArguments:
+  - --serversTransport.forwardingTimeouts.dialTimeout=10s
+  - --serversTransport.forwardingTimeouts.responseHeaderTimeout=300s
+  - --serversTransport.forwardingTimeouts.idleConnTimeout=90s

@@ -1,0 +1,19 @@
+# 新安装沿用单副本和独立的 IngressClass。
+deployment:
+  replicas: 1
+ingressClass:
+  enabled: true
+  name: traefik
+  isDefaultClass: false
+providers:
+  kubernetesIngress:
+    ingressClass: traefik
+  kubernetesGateway:
+    enabled: false
+gateway:
+  enabled: false
+gatewayClass:
+  enabled: false
+service:
+  spec:
+    externalTrafficPolicy: Cluster

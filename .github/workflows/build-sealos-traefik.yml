@@ -1,0 +1,49 @@
+name: 构建双架构 Traefik 安装镜像
+
+on:
+  push:
+    branches: [codex/traefik-nodeports]
+    paths:
+      - .github/workflows/build-sealos-traefik.yml
+      - .github/scripts/build-sealos-addons.sh
+      - .github/actions/install-sealos/action.yml
+      - applications/traefik/vlabs/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Traefik linux/${{ matrix.platform.arch }}
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-sealos
+        with:
+          arch: ${{ matrix.platform.arch }}
+      - name: 构建并核对离线镜像
+        env:
+          TARGET_ARCH: ${{ matrix.platform.arch }}
+        run: |
+          if ! /usr/bin/python3 -c 'import yaml' >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y python3-yaml
+          fi
+          bash .github/scripts/build-sealos-addons.sh "$TARGET_ARCH" traefik "$RUNNER_TEMP/sealos-images"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: traefik-linux-${{ matrix.platform.arch }}
+          path: ${{ runner.temp }}/sealos-images/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3

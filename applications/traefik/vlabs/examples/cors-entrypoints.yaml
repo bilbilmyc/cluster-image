@@ -1,0 +1,8 @@
+# 在两个业务入口的所有 HTTP 路由前执行；列表中保留已有中间件及其顺序。
+ports:
+  web:
+    http:
+      middlewares: [traefik-global-cors@kubernetescrd]
+  websecure:
+    http:
+      middlewares: [traefik-global-cors@kubernetescrd]

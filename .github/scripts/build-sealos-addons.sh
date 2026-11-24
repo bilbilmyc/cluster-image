@@ -41,10 +41,11 @@ package_image() {
 
 chart_images() {
     local chart="$1" name="$2" namespace="$3" values="$4" kube_version="$5" output_list="$6"
+    shift 6
 
     # 用实际的 Helm 渲染结果收集容器镜像，保留固定的标签和 digest。
     "$helm_bin" template "$name" "$chart" --namespace "$namespace" \
-        --kube-version "$kube_version" --values "$values" --skip-tests |
+        --kube-version "$kube_version" --values "$values" "$@" --skip-tests |
         /usr/bin/python3 -c '
 import sys
 import yaml
@@ -108,57 +109,44 @@ ENTRYPOINT
 
 traefik_image() {
     local context="$workspace/traefik"
-    local chart="$context/charts/traefik-$traefik_chart.tgz"
-    mkdir -p "$context/charts" "$context/images/shim"
+    local bundle="$context/vlabs-traefik"
+    local chart="$bundle/charts/traefik-$traefik_chart.tgz"
+    local release="$traefik_version-r2"
+    local expected_digest container root actual_digest
+    mkdir -p "$bundle/charts" "$context/images/shim"
+    cp -R applications/traefik/vlabs/. "$bundle/"
     "$helm_bin" pull 'oci://ghcr.io/traefik/helm/traefik' --version "$traefik_chart" \
-        --destination "$context/charts"
-    cat > "$context/values.yaml" <<'YAML'
-# 沿用测试环境的单副本和两个 NodePort。
-deployment:
-  replicas: 1
-ingressClass:
-  enabled: true
-  name: traefik
-  isDefaultClass: false
-providers:
-  kubernetesIngress:
-    ingressClass: traefik
-  kubernetesGateway:
-    enabled: false
-gateway:
-  enabled: false
-gatewayClass:
-  enabled: false
-service:
-  spec:
-    type: NodePort
-    externalTrafficPolicy: Cluster
-ports:
-  web:
-    nodePort: 30080
-  websecure:
-    nodePort: 30443
-YAML
+        --destination "$bundle/charts"
+    printf '%s  %s\n' a0d62ce742cbda20a4556475204b665e66be997e4c13f1b47c56844c462976c1 "$chart" | sha256sum --check
     cat > "$context/Kubefile" <<'KUBEFILE'
 FROM scratch
 COPY . .
-CMD ["bash entrypoint.sh"]
+CMD ["bash vlabs-traefik/install.sh"]
 KUBEFILE
-    cat > "$context/entrypoint.sh" <<'ENTRYPOINT'
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname -- "$0")"
-chart=(charts/traefik-*.tgz)
-helm upgrade --install traefik "${chart[0]}" --namespace traefik --create-namespace \
-    --values values.yaml --wait --timeout 5m
-ENTRYPOINT
-    chart_images "$chart" traefik traefik "$context/values.yaml" 1.37.2 \
-        "$context/images/shim/DefaultImageList"
-    package_image traefik "$traefik_version" "$context"
+    chart_images "$chart" traefik traefik "$bundle/defaults.yaml" 1.36.6 \
+        "$context/images/shim/DefaultImageList" --values "$bundle/ports.yaml"
+    package_image traefik "$release" "$context"
+
+    # 二进制仍按版本标签从离线仓库启动，核实打入该标签的上游平台摘要。
+    case "$arch" in
+        amd64) expected_digest='sha256:44b61e76a251fe586d17d881fc900452d0a7b4a4b08c97ce6eac86d45b4c8b9d' ;;
+        arm64) expected_digest='sha256:c9913a1db46a68ba0e72e9aa6cbb236dc1c33159f49b53d9ea20ad4df7b746c9' ;;
+        *) return 1 ;;
+    esac
+    container="$(sudo buildah from --pull=never "$registry/traefik:$release-$arch")"
+    root="$(sudo buildah mount "$container")"
+    actual_digest="$(sudo cat "$root/registry/docker/registry/v2/repositories/library/traefik/_manifests/tags/$traefik_version/current/link")"
+    sudo buildah rm "$container" >/dev/null
+    if [[ "$actual_digest" != "$expected_digest" ]]; then
+        printf '离线镜像摘要不符 / Offline image digest mismatch: %s, %s\n' "$arch" "$actual_digest" >&2
+        return 1
+    fi
 }
 
 if [[ "$group" == preview ]]; then
     cilium_image v1.21.0-pre.4 1.37.2
+elif [[ "$group" == traefik ]]; then
+    traefik_image
 else
     cp applications/helm/latest/Kubefile "$workspace/helm/"
     package_image helm "$helm_version" "$workspace/helm"
